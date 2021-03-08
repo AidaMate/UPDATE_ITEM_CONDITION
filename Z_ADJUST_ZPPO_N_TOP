@@ -1,0 +1,97 @@
+*&---------------------------------------------------------------------*
+*& Include          Z_ADJUST_ZPPO_ALV_DECL
+*&---------------------------------------------------------------------*
+
+TYPES: BEGIN OF st_vbrp,
+         vbeln   TYPE vbeln_vf,    "invoice number
+         posnr   TYPE posnr_vf,    "invoice item
+         vrkme   TYPE vrkme,
+         netwr   TYPE netwr_fp,
+         fkimg   TYPE fkimg,
+         zbeln   TYPE vbelv,
+         zposn   TYPE posnr_vf,
+         zvalue  TYPE netwr_fp,
+         zamount TYPE vfprc_element_amount,
+         old_val TYPE netwr_fp,
+         step    TYPE vfprc_cond_count,
+
+       END OF st_vbrp,
+
+       BEGIN OF st_elements,
+         knumv   TYPE knumv,
+         kposn   TYPE kposn,
+         kbetr   TYPE vfprc_element_amount,
+         zaehk   TYPE vfprc_cond_count,
+         zzbeln  TYPE vbeln,
+         zamount TYPE vfprc_element_amount,
+
+       END OF st_elements,
+
+*       BEGIN OF st_out,
+*         vbeln     TYPE vbeln_vf,    "invoice number
+*         posnr     TYPE posnr_vf,    "invoice item
+*         inv_pr    TYPE netwr_fp,    "invoice price
+*         ret_or    TYPE vbfa-vbeln,     "return order
+*         ret_posnr TYPE posnr_vf,    "return order item
+*         old_val   TYPE netwr_fp,    "old return value
+*         new_val   TYPE netwr_fp,    "new return price
+*         step      TYPE vfprc_cond_count,
+*       END OF st_out,
+
+       BEGIN OF st_out,
+         vbeln     TYPE vbeln_vf,    "invoice number
+         posnr     TYPE posnr_vf,    "invoice item
+         inv_pr    TYPE netwr_fp,    "invoice price
+         ret_or    TYPE vbfa-vbeln,  "return order
+         ret_posnr TYPE posnr_vf,    "return order item
+         sconto    TYPE ZKBETR_1,    "sconto for ZLSC
+         value     TYPE Z_KBETR,     "amount
+         step      TYPE vfprc_cond_count,
+       END OF st_out,
+
+       BEGIN OF st_log,
+         vbeln       TYPE vbeln_vf,    "invoice number
+         posnr       TYPE posnr_vf,    "invoice item
+         message(50),
+       END OF st_log.
+
+CONSTANTS: c_icona_verde  LIKE icon-id VALUE '@08@',
+           c_icona_gialla LIKE icon-id VALUE '@09@',
+           c_icona_rossa  LIKE icon-id VALUE '@0A@'.
+
+DATA: it_vbrp TYPE STANDARD TABLE OF st_vbrp.
+DATA: it_elements TYPE STANDARD TABLE OF st_elements.
+DATA: tb_out TYPE STANDARD TABLE OF st_out.
+DATA: wa_out LIKE LINE OF tb_out.
+DATA: tb_log TYPE STANDARD TABLE OF st_log,
+      wa_log LIKE LINE OF tb_log.
+
+DATA alv_table    TYPE REF TO cl_salv_table.
+DATA alv_columns TYPE REF TO cl_salv_columns_table.
+DATA single_column  TYPE REF TO cl_salv_column.
+DATA alv_events  TYPE REF TO cl_salv_events_table.
+
+
+DATA: lt_partnchang TYPE TABLE OF bapiparnrc.
+DATA: ls_partnchang TYPE bapiparnrc.
+DATA: lt_return TYPE TABLE OF bapiret2.
+DATA: ls_order_header_inx TYPE bapisdh1x.
+
+DATA: lr_selections TYPE REF TO cl_salv_selections,
+      lt_rows       TYPE salv_t_row,
+      lt_column     TYPE salv_t_column,
+      ls_cell       TYPE salv_s_cell.
+
+
+TYPES: BEGIN OF st_data,
+         vbeln  TYPE zvbrp-vbeln,
+         posnr  TYPE zvbrp-posnr,
+         zvbeln TYPE zvbrp-vbeln,
+         zposnr type zvbrp-posnr,
+       END OF st_data.
+
+
+DATA: tb_data TYPE STANDARD TABLE OF st_data,
+      wa_data LIKE LINE OF tb_data.
+
+DATA: ls_vbrp type st_vbrp.

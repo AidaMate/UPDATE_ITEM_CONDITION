@@ -1,0 +1,675 @@
+*&---------------------------------------------------------------------*
+*& Report Z_ADJUST_ZPPO
+*&---------------------------------------------------------------------*
+************************************************************************
+*&Author: Aida Matevosyan
+*&Purpose: Read the total price from the related invoice &
+*&will adjust the ZPP0 condition in the Return Order accordingly
+*&TicketNo: Ticket#2020070921000215
+*&Date: 24.08.2020
+************************************************************************
+*&---------------------------------------------------------------------*
+
+
+REPORT z_adjust_zppo_n.
+
+TABLES: vbfa.
+
+
+INCLUDE Z_ADJUST_ZPPO_N_ALV_DECL.
+*INCLUDE z_adjust_zppo_alv_decl.
+
+
+*SELECTION-SCREEN BEGIN OF block B1 WITH FRAME TITLE title .
+SELECT-OPTIONS: zret_ord FOR vbfa-vbeln.
+*SELECTION-SCREEN end of BLOCK b1.
+
+
+*INITIALIZATION.
+*title = 'Adjustment of ZPPO condition in the Return Order'.
+
+
+START-OF-SELECTION.
+  PERFORM data_retrieval.
+  PERFORM display_settings.
+
+
+
+END-OF-SELECTION.
+if tb_out is not INITIAL.
+  PERFORM display_alv_report.
+else.
+  MESSAGE 'No Data Found' type 'S' DISPLAY LIKE 'E'.
+endif.
+
+AT USER-COMMAND.
+  IF sy-ucomm = '&F03' OR sy-ucomm = '&F15' OR sy-ucomm = '&F12'.
+    LEAVE SCREEN.
+  ENDIF.
+
+
+
+
+
+
+FORM data_retrieval.
+  select * from VBKD
+    into TABLE @DATA(lt_VBKD)
+    WHERE vbeln  in @zret_ord
+      and BSTKD_E ne ''.
+
+  LOOP AT lt_vbkd into data(ls_vbkd).
+    move ls_vbkd-BSTKD_E to wa_data-vbeln.
+    move ls_vbkd-posex_e to wa_data-posnr.
+    move ls_vbkd-vbeln   to wa_data-zvbeln.
+    move ls_vbkd-posnr   to wa_data-zposnr.
+    append wa_data to tb_data.
+
+  ENDLOOP.
+
+  if tb_data is not INITIAL.
+    select * from ZVBRP
+      into TABLE @DATA(lt_ZVBRP)
+      FOR ALL ENTRIES IN @tb_data
+      WHERE VBELN    = @tb_data-vbeln
+        and posnr    = @tb_data-posnr.
+  endif.
+
+    if lt_zvbrp is NOT INITIAL.
+    LOOP AT lt_zvbrp into data(ls_zvbrp).
+      ls_vbrp-vbeln  = ls_zvbrp-vbeln.
+      ls_vbrp-posnr  = ls_zvbrp-posnr.
+      ls_vbrp-fkimg  = ls_zvbrp-fkimg.
+      ls_vbrp-zvalue = ls_zvbrp-scont.
+      READ TABLE tb_data into wa_data with KEY vbeln = ls_zvbrp-vbeln
+                                               posnr = ls_zvbrp-posnr.
+      if sy-subrc eq 0.
+      ls_vbrp-zbeln = wa_data-zvbeln.
+      ls_vbrp-zposn = wa_data-zposnr.
+      endif.
+      ls_vbrp-netwr = ls_zvbrp-PRLIS.
+      APPEND ls_vbrp to it_vbrp.
+
+    ENDLOOP.
+  endif.
+
+  CHECK it_vbrp IS NOT INITIAL.
+
+  DATA: ztabix TYPE sy-tabix.
+  LOOP AT it_vbrp INTO DATA(wa_vbrp).
+    ztabix = sy-tabix.
+    clear ls_zvbrp.
+*    READ TABLE it_vbfa INTO DATA(wa_vbfa) WITH KEY vbelv = wa_vbrp-vbeln
+*                                                   posnv = wa_vbrp-posnr.
+*    IF sy-subrc EQ 0.
+*      wa_vbrp-zvalue = wa_vbrp-netwr / wa_vbrp-fkimg.
+*      wa_vbrp-zbeln  = wa_vbfa-vbeln.
+*      wa_vbrp-zposn  = wa_vbfa-posnn.
+*      wa_vbrp-old_val = wa_vbfa-rfwrt / wa_vbfa-rfmng.
+*      MODIFY it_vbrp FROM wa_vbrp INDEX ztabix.
+*    ELSE.
+      READ TABLE lt_zvbrp into ls_zvbrp with key vbeln = wa_vbrp-vbeln
+                                                 posnr = wa_vbrp-posnr.
+      if sy-subrc eq 0.
+*        wa_vbrp-zvalue = wa_vbrp-netwr / wa_vbrp-fkimg.
+*        MODIFY it_vbrp FROM wa_vbrp INDEX ztabix.
+      else.
+      DELETE it_vbrp INDEX ztabix.
+      endif.
+*    ENDIF.
+  ENDLOOP.
+
+  DATA: it_knumv type STANDARD TABLE OF vbak.
+
+  check it_vbrp is not INITIAL.
+  SELECT * FROM vbak
+    into TABLE it_knumv
+    FOR ALL ENTRIES IN it_vbrp
+    WHERE vbeln = it_vbrp-zbeln.
+
+  CHECK it_knumv IS NOT INITIAL.
+
+  SELECT knumv kposn kbetr zaehk
+    FROM prcd_elements
+    INTO TABLE it_elements
+    FOR ALL ENTRIES IN it_knumv
+    WHERE knumv = it_knumv-knumv
+      AND kschl = 'ZLSC'
+      and KINAK = ''.
+
+  CHECK it_elements IS NOT INITIAL.
+  DATA: ztabix1 TYPE sy-tabix.
+  LOOP AT it_elements INTO DATA(wa_elements).
+    READ TABLE it_knumv INTO DATA(wa_knumv) WITH KEY knumv = wa_elements-knumv.
+
+    IF sy-subrc EQ 0.
+      wa_elements-kbetr = abs( wa_elements-kbetr ) / 100.
+      wa_elements-zamount = 1 -  wa_elements-kbetr .
+      wa_elements-zzbeln  = wa_knumv-vbeln.
+      MODIFY it_elements FROM wa_elements.
+    ELSE.
+      DELETE it_elements INDEX ztabix1.
+    ENDIF.
+  ENDLOOP.
+
+  DATA: ztabix2 TYPE sy-tabix.
+
+  LOOP AT it_vbrp INTO DATA(wa_data).
+    ztabix2 = sy-tabix.
+    READ TABLE it_elements INTO DATA(wa_elem) WITH KEY zzbeln = wa_data-zbeln
+                                                       kposn  = wa_data-zposn.
+    IF sy-subrc EQ 0.
+*      wa_data-zamount = wa_data-zvalue / wa_elem-zamount.
+*      wa_data-zamount = wa_data-
+      wa_data-step = wa_elem-zaehk.
+      MODIFY it_vbrp FROM wa_data.
+    ELSE.
+      DELETE it_vbrp INDEX ztabix2.
+    ENDIF.
+  ENDLOOP.
+*         begin OF st_out,
+*         vbeln  TYPE vbeln_vf,    "invoice number
+*         posnr  TYPE posnr_vf,    "invoice item
+*         inv_pr type netwr_fp,    "invoice price
+*         ret_or type vbfa-vbeln,     "return order
+*         ret_posnr type posnr_vf,    "return order item
+*         old_val   type netwr_fp,    "old return value
+*         new_val   type netwr_fp,    "new return price
+*       END OF st_out.
+
+  LOOP AT it_vbrp INTO DATA(wa_info).
+    wa_out-vbeln = wa_info-vbeln.
+    wa_out-posnr = wa_info-posnr.
+    wa_out-inv_pr = wa_info-zvalue.    "invoice price
+    wa_out-ret_or = wa_info-zbeln.
+    wa_out-ret_posnr = wa_info-zposn.
+    wa_out-sconto = wa_info-zvalue.
+    wa_out-value = wa_info-netwr.
+    wa_out-step  = wa_info-step.
+    APPEND wa_out TO tb_out.
+
+
+  ENDLOOP.
+
+  SORT tb_out BY vbeln posnr.
+
+ENDFORM.
+
+CLASS cl_event_handler DEFINITION.
+  PUBLIC SECTION.
+    CLASS-METHODS: on_added_function               " ADDED_FUNCTION FOR USER_COMMAND
+      FOR EVENT if_salv_events_functions~added_function
+                  OF cl_salv_events_table
+      IMPORTING e_salv_function.
+    CLASS-METHODS:
+      set_top_of_page
+        CHANGING co_alv TYPE REF TO cl_salv_table.
+
+ENDCLASS.                    "cl_event_handler DEFINITION
+
+
+*----------------------------------------------------------------------*
+*       CLASS cl_event_handler IMPLEMENTATION
+*----------------------------------------------------------------------*
+*
+*----------------------------------------------------------------------*
+CLASS cl_event_handler IMPLEMENTATION.
+  METHOD on_added_function.
+
+*    ADD USER COMMAND HERE: FOR EXAMPLE IF THERE IS AN EXPORT BUTTON FOR XLS
+*    YOU CAN WRITE THE CODE LIKE THIS:
+
+    IF e_salv_function EQ '&UPDATE'.  "&XLS IS THE BUTTON FUNCTION CODE
+      PERFORM update.          "WRITE ALL THE FUNCTIONALITY IN THE PERFORM
+    ENDIF.
+
+
+  ENDMETHOD.                    "on_added_function
+
+
+
+  METHOD set_top_of_page.
+*
+    DATA: lo_header  TYPE REF TO cl_salv_form_layout_grid,
+          lo_h_label TYPE REF TO cl_salv_form_label,
+          lo_h_flow  TYPE REF TO cl_salv_form_layout_flow.
+
+*    DATA: lo_tabsize(10).
+*
+*   header object
+    CREATE OBJECT lo_header.
+*
+*   To create a Lable or Flow we have to specify the target
+*     row and column number where we need to set up the output
+*     text.
+*
+    DESCRIBE TABLE tb_out LINES DATA(tabsize).
+*   information in Bold
+    lo_h_label = lo_header->create_label( row = 1 column = 1 ).
+    lo_h_label->set_text( 'List of Adjustments' ).
+*
+*   information in tabular format
+    lo_h_flow = lo_header->create_flow( row = 2  column = 1 ).
+    lo_h_flow->create_text( text = 'Number of Records in the output: ' ).
+*
+*    lo_h_flow = lo_header->create_flow( row = 3  column = 1 ).
+*    lo_h_flow->create_text( text = 'Date:' ).
+
+    lo_h_flow = lo_header->create_flow( row = 4  column = 1 ).
+    lo_h_flow->create_text( text = '' ).
+*
+    CONCATENATE 'Date : ' space(1) sy-datum+6(2) '.' sy-datum+4(2) '.' sy-datum(4)
+    INTO DATA(txt).
+    lo_h_flow = lo_header->create_flow( row = 3  column = 1 ).
+    lo_h_flow->create_text( text = txt ).
+
+    lo_h_flow = lo_header->create_flow( row = 2  column = 2 ).
+    lo_h_flow->create_text( text = tabsize ).
+*
+*   set the top of list using the header for Online.
+    co_alv->set_top_of_list( lo_header ).
+*
+*   set the top of list using the header for Print.
+    co_alv->set_top_of_list_print( lo_header ).
+*
+  ENDMETHOD.                    "set_top_of_page
+ENDCLASS.                    "cl_event_handler IMPLEMENTATION
+
+*&---------------------------------------------------------------------*
+*& Form DISPLAY_ALV_REPORT
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM display_alv_report .
+
+  alv_table->display( ).
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form DISPLAY_SETTINGS
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM display_settings .
+
+  DATA: err_message   TYPE REF TO cx_salv_msg.
+  DATA: lo_functions TYPE REF TO cl_salv_functions_list,
+        o_selections TYPE REF TO cl_salv_selections,
+        lo_columns   TYPE REF TO cl_salv_columns_table,
+        lo_column    TYPE REF TO cl_salv_column.
+
+
+
+  TRY.
+      cl_salv_table=>factory(
+      IMPORTING
+        r_salv_table = alv_table
+      CHANGING
+        t_table      = tb_out ).
+
+      alv_columns = alv_table->get_columns( ).
+      alv_columns->set_optimize( 'X' ). "optimise colums of SALV grid
+*      alv_columns->set_color_column( 'LINE_COLOR' ). "set line colour of SALV report
+
+
+
+      CALL METHOD cl_event_handler=>set_top_of_page
+        CHANGING
+          co_alv = alv_table.
+
+      lr_selections = alv_table->get_selections( ).
+
+*... §7.1 set selection mode
+      lr_selections->set_selection_mode( if_salv_c_selection_mode=>row_column ).
+
+
+      alv_events = alv_table->get_event( ).
+      SET HANDLER cl_event_handler=>on_added_function FOR alv_events.
+
+      PERFORM build_fieldcatalog.
+
+      PERFORM build_layout.
+*      PERFORM build_fieldcatalog.
+      PERFORM build_toolbar.
+      PERFORM hide_columns.
+      PERFORM report_settings.
+
+    CATCH cx_salv_msg INTO err_message.
+*   Add error processing
+  ENDTRY.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form BUILD_LAYOUT
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM build_layout .
+  DATA: layout TYPE REF TO cl_salv_layout.
+  DATA: layout_key      TYPE salv_s_layout_key.
+
+  layout = alv_table->get_layout( ).
+
+  layout_key-report = sy-repid.
+  layout->set_key( layout_key ).
+
+  layout->set_save_restriction( if_salv_c_layout=>restrict_none ).
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form BUILD_FIELDCATALOG
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM build_fieldcatalog .
+  DATA: err_notfound TYPE REF TO cx_salv_not_found.
+
+  TRY.
+      single_column = alv_columns->get_column( columnname = 'VBELN').
+      single_column->set_short_text( 'Inv.Num.' ).  "Will cause syntax error if text is too long
+      single_column->set_medium_text( 'Invoice Num.' ).
+      single_column->set_long_text( 'Invoice Number' ).
+      single_column->set_output_length( '30' ). "Force column to be wider to accomodate heading
+    CATCH cx_salv_not_found INTO err_notfound.
+*   Add error processing
+  ENDTRY.
+
+  TRY.
+      single_column = alv_columns->get_column( columnname = 'POSNR' ).
+      single_column->set_short_text( 'Inv.Itm' ).  "Will cause syntax error if text is too long
+      single_column->set_medium_text( 'Inv.Item' ).
+      single_column->set_long_text( 'Invoice Item' ).
+      single_column->set_output_length( '20' ). "Force column to be wider to accomodate heading
+
+    CATCH cx_salv_not_found INTO err_notfound.
+*   Add error processing
+  ENDTRY.
+
+  TRY.
+      single_column = alv_columns->get_column( columnname =  'INV_PR' ).
+      single_column->set_short_text( 'Inv.Pr.' ).  "Will cause syntax error if text is too long
+      single_column->set_medium_text( 'Inv.Price' ).
+      single_column->set_long_text( 'Invoice Price' ).
+      single_column->set_output_length( '30' ). "Force column to be wider to accomodate heading
+
+    CATCH cx_salv_not_found INTO err_notfound.
+*   Add error processing
+  ENDTRY.
+
+  TRY.
+      single_column = alv_columns->get_column( columnname =  'RET_OR' ).
+      single_column->set_short_text( 'Ret.Ord' ).  "Will cause syntax error if text is too long
+      single_column->set_medium_text( 'Ret.Order' ).
+      single_column->set_long_text( 'Return Order' ).
+      single_column->set_output_length( '30' ). "Force column to be wider to accomodate heading
+
+    CATCH cx_salv_not_found INTO err_notfound.
+*   Add error processing
+  ENDTRY.
+
+  TRY.
+      single_column = alv_columns->get_column( columnname =  'RET_POSNR' ).
+      single_column->set_short_text( 'Ret.Itm' ).  "Will cause syntax error if text is too long
+      single_column->set_medium_text( 'Ret.Item' ).
+      single_column->set_long_text( 'Return Order Item' ).
+      single_column->set_output_length( '30' ). "Force column to be wider to accomodate heading
+
+    CATCH cx_salv_not_found INTO err_notfound.
+*   Add error processing
+  ENDTRY.
+
+  TRY.
+      single_column = alv_columns->get_column( columnname =  'OLD_VAL' ).
+      single_column->set_short_text( 'Old.Val' ).  "Will cause syntax error if text is too long
+      single_column->set_medium_text( 'Old.Value' ).
+      single_column->set_long_text( 'Old Return Value' ).
+      single_column->set_output_length( '30' ). "Force column to be wider to accomodate heading
+
+    CATCH cx_salv_not_found INTO err_notfound.
+*   Add error processing
+  ENDTRY.
+
+  TRY.
+      single_column = alv_columns->get_column( columnname =  'NEW_VAL' ).
+      single_column->set_short_text( 'New.Val' ).  "Will cause syntax error if text is too long
+      single_column->set_medium_text( 'New.Value' ).
+      single_column->set_long_text( 'New Return Value' ).
+      single_column->set_output_length( '30' ). "Force column to be wider to accomodate heading
+
+    CATCH cx_salv_not_found INTO err_notfound.
+*   Add error processing
+  ENDTRY.
+*  ret_posnr
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form BUILD_TOOLBAR
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM build_toolbar .
+  DATA: toolbar_functions TYPE REF TO cl_salv_functions_list.
+
+*  toolbar_functions = alv_table->get_functions( ).
+*  toolbar_functions->set_all( ).
+  alv_table->set_screen_status(
+       pfstatus    = 'ZSALV'
+       report      = 'Z_ADJUST_ZPPO'
+       set_functions = alv_table->c_functions_all ).
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form HIDE_COLUMNS
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM hide_columns .
+  DATA: err_notfound TYPE REF TO cx_salv_not_found.
+
+  TRY.
+      single_column = alv_columns->get_column( 'STEP' ).
+      single_column->set_visible( if_salv_c_bool_sap=>false ).
+
+    CATCH cx_salv_not_found INTO err_notfound.
+*   Add error processing
+  ENDTRY.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form REPORT_SETTINGS
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM report_settings .
+  DATA: report_settings TYPE REF TO cl_salv_display_settings.
+
+  report_settings = alv_table->get_display_settings( ).
+  report_settings->set_striped_pattern( if_salv_c_bool_sap=>true ).
+
+ENDFORM.
+
+
+*&---------------------------------------------------------------------*
+*& Form UPDATE
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM update .
+  DATA lt_rows TYPE salv_t_row.
+  DATA conditions_in TYPE STANDARD TABLE OF bapicond WITH HEADER LINE.
+
+  DATA conditions_inx TYPE STANDARD TABLE OF bapicondx WITH HEADER LINE.
+  DATA lv_salesdocument TYPE bapivbeln-vbeln.
+  DATA: value TYPE bapikbetr1.
+  DATA: sconto TYPE bapikbetr1.
+  DATA: step   type DZAEHK_SHORT.
+  lr_selections = alv_table->get_selections( ).
+
+*... §7.1 set selection mode
+  lr_selections->set_selection_mode( if_salv_c_selection_mode=>row_column ).
+
+  lt_rows = lr_selections->get_selected_rows( ).
+
+  LOOP AT lt_rows INTO DATA(ls_row).
+    REFRESH lt_return[].
+    CLEAR conditions_inx.
+    CLEAR conditions_in.
+    CLEAR lv_salesdocument.
+    CLEAR ls_order_header_inx.
+
+    READ TABLE tb_out INTO DATA(data) INDEX ls_row.
+    IF sy-subrc EQ 0.
+*      value = CONV bapikbetr1( data-value ).
+*      ls_order_header_inx-updateflag = 'U'.
+*      lv_salesdocument = data-ret_or.
+*      conditions_in-itm_number = data-ret_posnr.
+*      conditions_in-cond_type = 'ZPP0'.
+*      conditions_in-cond_value = value / 10 ."data-new_val.
+*      conditions_in-cond_p_unt = 1.
+*      conditions_in-cond_count = '01'.
+*      conditions_inx-itm_number = data-ret_posnr.
+*      conditions_inx-cond_type = 'ZPP0'.
+*      conditions_inx-updateflag = 'U'.
+*      conditions_inx-cond_value = 'X'.
+*      conditions_inx-cond_count = '01'.
+*      conditions_inx-cond_p_unt  = 'X'.
+*
+*      APPEND conditions_in.
+*      APPEND conditions_inx.
+
+      clear conditions_in.
+      clear conditions_inx.
+      sconto = CONV bapikbetr1( data-sconto ).
+      step   = CONV DZAEHK_SHORT( data-step ).
+      ls_order_header_inx-updateflag = 'U'.
+      lv_salesdocument = data-ret_or.
+      conditions_in-itm_number = data-ret_posnr.
+      conditions_in-cond_type = 'ZLSC'.
+      conditions_in-cond_value = sconto ."data-new_val.
+*      conditions_in-cond_p_unt = 1.
+      conditions_in-cond_count = step .
+      conditions_inx-itm_number = data-ret_posnr.
+      conditions_inx-cond_type = 'ZLSC'.
+      conditions_inx-updateflag = 'U'.
+      conditions_inx-cond_value = 'X'.
+      conditions_inx-cond_count = step.
+      conditions_inx-cond_p_unt  = 'X'.
+
+      APPEND conditions_in.
+      APPEND conditions_inx.
+
+      CALL FUNCTION 'BAPI_SALESORDER_CHANGE'
+        EXPORTING
+          salesdocument    = lv_salesdocument
+*         ORDER_HEADER_IN  =
+          order_header_inx = ls_order_header_inx
+*         SIMULATION       =
+*         BEHAVE_WHEN_ERROR           = ' '
+*         INT_NUMBER_ASSIGNMENT       = ' '
+          logic_switch     = VALUE bapisdls(
+                         cond_handl = 'X' )
+*         NO_STATUS_BUF_INIT          = ' '
+        TABLES
+          return           = lt_return
+*         ORDER_ITEM_IN    =
+*         ORDER_ITEM_INX   =
+*         PARTNERS         =
+*         PARTNERCHANGES   =
+*         PARTNERADDRESSES =
+*         ORDER_CFGS_REF   =
+*         ORDER_CFGS_INST  =
+*         ORDER_CFGS_PART_OF          =
+*         ORDER_CFGS_VALUE =
+*         ORDER_CFGS_BLOB  =
+*         ORDER_CFGS_VK    =
+*         ORDER_CFGS_REFINST          =
+*         SCHEDULE_LINES   =
+*         SCHEDULE_LINESX  =
+*         ORDER_TEXT       =
+*         ORDER_KEYS       =
+          conditions_in    = conditions_in[]
+          conditions_inx   = conditions_inx[]
+*         EXTENSIONIN      =
+*         EXTENSIONEX      =
+*         NFMETALLITMS     =
+        .
+*    set PF-STATUS 'ZSALV'.
+
+      DATA: flag(1).
+      CLEAR flag.
+      LEAVE TO LIST-PROCESSING AND RETURN TO SCREEN 0.
+      SET PF-STATUS space.
+      SUPPRESS DIALOG.
+
+      LOOP AT lt_return INTO DATA(wa_return) WHERE type CA 'EAXI'.
+        if wa_return-type = 'I'.
+        WRITE: / c_icona_gialla, '  Return Order: ', data-ret_or , ' Return Order item: ', data-ret_posnr, ' not updated due to: ' , wa_return-message.
+        else.
+        WRITE: / c_icona_rossa, '  Return Order: ', data-ret_or , ' Return Order item: ', data-ret_posnr, ' not updated due to: ' , wa_return-message.
+        endif.
+        EXIT.
+      ENDLOOP.
+
+
+
+      IF sy-subrc NE 0.
+        CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+          EXPORTING
+            wait = 'X'.
+        WRITE: / c_icona_verde, '  Return Order: ', data-ret_or , ' Return Order item: ', data-ret_posnr, ' successfully updated' .
+
+*          <fs_select>-icon  = c_icona_verde.
+*          <fs_select>-lgort = p_lgort.
+      ELSE.
+        CALL FUNCTION 'BAPI_TRANSACTION_ROLLBACK'.
+*          <fs_select>-icon  = c_icona_rossa.
+*          <fs_select>-note  = return-message.
+      ENDIF.
+*      loop at lt_return INTO DATA(wa_return) where type <> 'E' or type <> 'A' or type <> 'I' .
+*        CALL FUNCTION 'BAPI_TRANSACTION_COMMIT'
+*          EXPORTING
+*            wait = 'X'.
+*        WRITE: 'Return Order: ', data-ret_or , ' Return Order item: ', data-ret_posnr, ' successfully updated'.
+*
+*      ENDLOOP.
+*
+*        WRITE: 'Return Order: ', data-ret_or , ' Return Order item: ', data-ret_posnr, ' not updated due to: ' , wa_return-message_v1.
+    ENDIF.
+  ENDLOOP.
+
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Module status_0100 OUTPUT
+*&---------------------------------------------------------------------*
+*&
+*&---------------------------------------------------------------------*
+*MODULE status_0100 OUTPUT.
+*  SET PF-STATUS 'ZSALV'.
+** SET TITLEBAR 'xxx'.
+*  PERFORM display_settings.
+*  PERFORM display_alv_report.
+*ENDMODULE.
